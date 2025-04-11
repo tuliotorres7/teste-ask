@@ -7,42 +7,41 @@ async function fetchAvailableRooms(checkin, checkout) {
     const page = await BrowserService.getNewPage(browser);
     await page.goto(url, { waitUntil: 'networkidle2' })
     try {
-        await page.waitForSelector('[data-campo="cupomAplicado"]');
+        await page.waitForSelector('.row.tarifa');
     } catch (e) {
-        console.log('No tariffs found')
+        //A primeira pesquisa encontrará quartos com ou sem preços. Caso nao encontre,
+        //fará uma segunda requisição. Isso foi feito para contornar os 3 possiveis tipos de resposta,
+        // sendo que não encontrei um seletor que aguarde as tarifas serem carregadas, mas que exista 
+        // quando não existem acomodações na resposta do site.
+        if(e.name == 'TimeoutError') {
+            try {
+                await page.waitForSelector('.row.borda-cor.msgSemQuarto');
+            }catch(innerError){
+                throw new Error('Internal Server Error');
+            }
+        }else{
+            throw new Error('Internal Server Error');
+        }
     }
     const availableRooms = await page.evaluate(() => {
         const response = []
+        const  roomsNotAvailable = document.querySelectorAll('.row.borda-cor.msgSemQuarto')
+        const style = roomsNotAvailable? roomsNotAvailable[0].getAttribute('style') : null
+        if(style && !style.includes('display: none;')) {
+            return []
+        }
         const accomodations = document.querySelectorAll('.row.borda-cor')
-
         accomodations.forEach(accomodation => {
             const name = accomodation.querySelector('h3[data-campo="titulo"]')
             const description = accomodation.querySelector('.quarto.descricao')
-            const tariffs = accomodation.querySelectorAll('.row.tarifa')
-            const imagesSlide = accomodation.querySelectorAll('.slides li:not(.clone) a[data-fancybox="images"]')
-            const images = []
-            const price = []
-
-            tariffs.forEach(tariff => {
-                const nameRate = tariff.querySelector('h4[data-campo="nome"]')
-                const valueRate = tariff.querySelector('b[data-campo="valor"]')
-                if (nameRate && valueRate) {
-                    price.push({
-                        "tariffName": nameRate.textContent.trim(),
-                        "value": valueRate.textContent.trim()
-                    })
-                }
-            })
-
-            imagesSlide.forEach((a) => {
-                images.push(a.href)
-            })
-            //Quartos com display:none não possuem tarifa. Portanto não serão enviados
-            if (name && description && images.length > 0 && price.length > 0) {
+            const tariff = accomodation.querySelector('div[data-tarifa-codigo="17"] b[data-campo="valor"]')
+            const imageActive = accomodation.querySelector('.slides li.flex-active-slide a[data-fancybox="images"]')
+            const price = tariff ? tariff.textContent.trim() : null
+            if (name && description && imageActive && price) {
                 response.push({
                     "name": name.textContent.trim(),
                     "description": description.textContent.trim(),
-                    "image": images,
+                    "image": imageActive.getAttribute('href'),
                     "price": price,
                 })
             }
